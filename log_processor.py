@@ -2,6 +2,7 @@ import sys
 import csv
 import statistics
 import colorama 
+from typing import List, Set
 from termcolor import colored
 colorama.init()
 
@@ -115,10 +116,10 @@ class Round():
         self.turn = None
         self.river = None
 
-        self.preflop_moves = []
-        self.flop_moves = []
-        self.turn_moves = []
-        self.river_moves = []
+        self.preflop_moves : List[Action] = []
+        self.flop_moves : List[Action] = []
+        self.turn_moves : List[Action] = []
+        self.river_moves : List[Action] = []
 
     @property
     def small_blind(self) -> (str, int):
@@ -151,9 +152,22 @@ class Round():
                 spent[player] += amount
         return spent
 
-    def names_of_participants(self):
-        return [name for name, val in self.money_spent().items() if val > 0]
-    
+    def voluntary_contributors(self) -> Set[str]:
+        voluntary_contributors = set()
+        for m in self.preflop_moves:
+            if (
+                m.action_name not in ["small_blind", "big_blind", "missing_big_blind", "missing_small_blind"]
+                and m.amount > 0
+            ):
+                voluntary_contributors.add(m.player)
+        return voluntary_contributors
+
+    def players_present(self) -> Set[str]:
+        present = set()
+        for m in self.preflop_moves:
+            present.add(m.player)
+        return present            
+
     def names_in_showdown(self):
         names = set()
         for move in self.river_moves:
@@ -245,10 +259,18 @@ class Parser():
             cards = line.split(" shows a ")[1][:-1].split(", ")
             self._current_round.known_hands[player_name] = cards
             self._current_round.add_move(player_name, "show", 0, time)
+        elif "posts a missing small blind of" in line:            
+            player_name = line.split('"')[1]
+            small_blind = int(line.split()[-1])
+            self._current_round.add_move(player_name, "missing_small_blind", small_blind, time)
         elif "posts a small blind of" in line:
             player_name = line.split('"')[1]
             small_blind = int(line.split()[-1])
             self._current_round.add_move(player_name, "small_blind", small_blind, time)
+        elif "posts a missed big blind of" in line:            
+            player_name = line.split('"')[1]
+            small_blind = int(line.split()[-1])
+            self._current_round.add_move(player_name, "missing_big_blind", small_blind, time)
         elif "posts a big blind of" in line:
             player_name = line.split('"')[1]
             big_blind = int(line.split()[-1])
@@ -332,30 +354,35 @@ class WinStats:
             pct_at_showdown = safe_div(len(showdown_wins[player]),  num_wins ) * 100
             pct_at_preshowdown = safe_div(len(preshowdown_wins[player]), num_wins ) * 100
             win_amts = showdown_wins[player] + preshowdown_wins[player]
-            avg_win_amt = avg(win_amts)
-            avg_showdown_amt = avg(showdown_wins[player])
-            avg_preshowdown_amt = avg(preshowdown_wins[player])
+            median_win_amt = statistics.median(win_amts)
+            median_showdown_amt = statistics.median(showdown_wins[player])
+            median_preshowdown_amt = statistics.median(preshowdown_wins[player])
 
             print(colored(f"  {player}", "white", attrs=["bold"]))
-            print(f"    # wins (avg amt): {num_wins:>2} ({avg_win_amt:0.0f})")
-            print(f"       %    showdown (avg_amt): {pct_at_showdown:>6.2f}% ({avg_showdown_amt:0.0f})")
-            print(f"       % preshowdown (avg_amt): {pct_at_preshowdown:>6.2f}% ({avg_preshowdown_amt:0.0f})")
+            print(f"    # wins (median): {num_wins:>2} ({median_win_amt:0.0f})")
+            print(f"       %    showdown (median): {pct_at_showdown:>6.2f}% ({median_showdown_amt:0.0f})")
+            print(f"       % preshowdown (median): {pct_at_preshowdown:>6.2f}% ({median_preshowdown_amt:0.0f})")
         print()
 
 class PlayStats:
     def __init__(self, evening: Evening, win_stats: WinStats):
         self.evening = evening
         self.win_stats = win_stats
-        rounds_played = defaultdict(int)
+        rounds_present = defaultdict(int)
+        rounds_contributed = defaultdict(int)
         showdowns_played = defaultdict(int)
         for round in evening.rounds:
             for player in round.names_in_showdown():
                 showdowns_played[player] += 1
             
-            for player in round.names_of_participants():
-                rounds_played[player] += 1
-        
-        self.rounds_played = rounds_played
+            for player in round.voluntary_contributors():
+                rounds_contributed[player] += 1
+            
+            for player in round.players_present():
+                rounds_present[player] += 1
+
+        self.rounds_present = rounds_present
+        self.rounds_contributed = rounds_contributed
         self.showdowns_played = showdowns_played
     
     def print(self):
@@ -367,16 +394,17 @@ class PlayStats:
         total_rounds = len(self.evening.rounds)
         print(f"Rounds: {total_rounds}")
         for player in self.evening.players.keys():
+            total_rounds = self.rounds_present[player]
             player_wins = len(self.win_stats.wins[player])
             player_showdown_wins = len(self.win_stats.showdown_wins[player])
-            pct_played = safe_div(self.rounds_played[player], total_rounds) * 100
-            pct_played_wins = safe_div(player_wins, self.rounds_played[player]) *  100
+            pct_played = safe_div(self.rounds_contributed[player], total_rounds) * 100
+            pct_played_wins = safe_div(player_wins, self.rounds_contributed[player]) *  100
             pct_showdown_wins = safe_div(player_showdown_wins, self.showdowns_played[player]) * 100
     
             print(colored(f"  Player: {player}", "white", attrs=["bold"]))
-            print(f"    % Games Played                :  {pct_played:>6.2f}%")
-            print(f"    Games     won / played (% won):  {player_wins:>3d} / {self.rounds_played[player]:>3d} ({pct_played_wins:>6.2f}%)" )
-            print(f"    Showdowns won / played (% won):  {player_showdown_wins:>3d} / {self.showdowns_played[player]:>3d} ({pct_showdown_wins:>6.2f}%)")
+            print(f"    Voluntary Contrib.  / Present  (VC%) : {self.rounds_contributed[player]:>3d} / {total_rounds:>3d} ({pct_played:>6.2f}%)")
+            print(f"    Games     won / VC (% won)           : {player_wins:>3d} / {self.rounds_contributed[player]:>3d} ({pct_played_wins:>6.2f}%)" )
+            print(f"    Showdowns won / VC (% won)           : {player_showdown_wins:>3d} / {self.showdowns_played[player]:>3d} ({pct_showdown_wins:>6.2f}%)")
         print()
 
 class PreFlopStats:
