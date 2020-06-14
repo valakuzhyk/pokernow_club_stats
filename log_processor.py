@@ -1,14 +1,11 @@
 import sys
 import csv
-import statistics
 import colorama 
 from typing import List, Set
-from termcolor import colored
-colorama.init()
-
-
 from collections import defaultdict
-
+from variance_stats import hand_variance
+from player_stats import WinStats, PlayStats, PreFlopStats
+colorama.init()
 
 
 # Ideas for analyses 
@@ -29,13 +26,13 @@ from collections import defaultdict
 #   Ratio of showing cards to not showing cards
 #   Willingly shared cards
 
-CARD_ORDER = ['2', '3','4', '5','6','7','8','9','T','J','Q','K','A']
 
-class Player():
+class Player:
     def __init__(self, starting_amount):
         self.stack_amt = starting_amount
 
-class Evening():
+
+class Evening:
     def __init__(self, username):
         self.username = username
         self.rounds = []
@@ -46,16 +43,13 @@ class Evening():
         import matplotlib.pyplot as plt 
 
         for player, amts in self.historical_amounts.items():
-            plt.plot(range(len(amts)), amts, label= player)
+            plt.plot(range(len(amts)), amts, label=player)
         
         plt.xlabel("Round #")
         plt.ylabel("# of Chips")
 
         plt.legend()
         plt.show()
-        
-
-
 
     def add_player(self, name, amount):
         if name in self.players:
@@ -90,7 +84,8 @@ class Evening():
             else:
                 self.players[winner_name] += amt
 
-class Action():
+
+class Action:
     def __init__(self, player, action_name, amount, time_stamp):
         self.player = player
         self.action_name = action_name
@@ -103,7 +98,8 @@ class Action():
     def __repr__(self):
         return self.__str__()
 
-class Round():
+
+class Round:
     def __init__(self, dealer, players):
         self.initial_amounts = {name: amt for (name, amt) in players.items()}
         self.dealer = dealer
@@ -200,7 +196,7 @@ class Round():
         return s
 
 
-class Parser():
+class Parser:
     def __init__(self):
         self.username = None 
 
@@ -251,7 +247,7 @@ class Parser():
             print(f"Started hand dealer: {dealer_name}")
             self.evening.add_round(dealer_name)
         elif line.startswith("Your hand is "):
-            cards = line[len("Your hand is "): ].split(", ")
+            cards = line[len("Your hand is "):].split(", ")
             self._current_round.known_hands[self.username] = cards
         elif " shows a " in line:
             player_name = line.split('"')[1]
@@ -325,198 +321,23 @@ class Parser():
             print(line)
             assert False
 
-class WinStats:
-    def __init__(self, evening):
-        # # of wins
-        # avg size of wins
-        self.evening = evening
-        wins = defaultdict(list)
-        showdown_wins = defaultdict(list)
-        preshowdown_wins = defaultdict(list)
-        for round in evening.rounds:
-            for (player, hand, amt, _) in round.winners:
-                wins[player].append(amt)
-                if hand is None:
-                    preshowdown_wins[player].append(amt)
-                else:
-                    showdown_wins[player].append(amt)
-        self.wins = wins
-        self.showdown_wins = showdown_wins
-        self.preshowdown_wins = preshowdown_wins
-
-    def print(self):
-        showdown_wins = self.showdown_wins
-        preshowdown_wins = self.preshowdown_wins
-
-        print(colored("Win Stats (Where did your money come from?)", "white", attrs=["underline"]))
-        for player in self.evening.players.keys():
-            num_wins = len(showdown_wins[player]) + len(preshowdown_wins[player])
-            pct_at_showdown = safe_div(len(showdown_wins[player]),  num_wins ) * 100
-            pct_at_preshowdown = safe_div(len(preshowdown_wins[player]), num_wins ) * 100
-            win_amts = showdown_wins[player] + preshowdown_wins[player]
-            median_win_amt = statistics.median(win_amts)
-            median_showdown_amt = statistics.median(showdown_wins[player])
-            median_preshowdown_amt = statistics.median(preshowdown_wins[player])
-
-            print(colored(f"  {player}", "white", attrs=["bold"]))
-            print(f"    # wins (median): {num_wins:>2} ({median_win_amt:0.0f})")
-            print(f"       %    showdown (median): {pct_at_showdown:>6.2f}% ({median_showdown_amt:0.0f})")
-            print(f"       % preshowdown (median): {pct_at_preshowdown:>6.2f}% ({median_preshowdown_amt:0.0f})")
-        print()
-
-class PlayStats:
-    def __init__(self, evening: Evening, win_stats: WinStats):
-        self.evening = evening
-        self.win_stats = win_stats
-        rounds_present = defaultdict(int)
-        rounds_contributed = defaultdict(int)
-        showdowns_played = defaultdict(int)
-        for round in evening.rounds:
-            for player in round.names_in_showdown():
-                showdowns_played[player] += 1
-            
-            for player in round.voluntary_contributors():
-                rounds_contributed[player] += 1
-            
-            for player in round.players_present():
-                rounds_present[player] += 1
-
-        self.rounds_present = rounds_present
-        self.rounds_contributed = rounds_contributed
-        self.showdowns_played = showdowns_played
-    
-    def print(self):
-        # % How often you saw each stage
-        # % Showdowns won
-
-
-        print(colored("Play Stats (What happened when you played in a round?)", "white", attrs=["underline"]))
-        total_rounds = len(self.evening.rounds)
-        print(f"Rounds: {total_rounds}")
-        for player in self.evening.players.keys():
-            total_rounds = self.rounds_present[player]
-            player_wins = len(self.win_stats.wins[player])
-            player_showdown_wins = len(self.win_stats.showdown_wins[player])
-            pct_played = safe_div(self.rounds_contributed[player], total_rounds) * 100
-            pct_played_wins = safe_div(player_wins, self.rounds_contributed[player]) *  100
-            pct_showdown_wins = safe_div(player_showdown_wins, self.showdowns_played[player]) * 100
-    
-            print(colored(f"  Player: {player}", "white", attrs=["bold"]))
-            print(f"    Voluntary Contrib.  / Present  (VC%) : {self.rounds_contributed[player]:>3d} / {total_rounds:>3d} ({pct_played:>6.2f}%)")
-            print(f"    Games     won / VC (% won)           : {player_wins:>3d} / {self.rounds_contributed[player]:>3d} ({pct_played_wins:>6.2f}%)" )
-            print(f"    Showdowns won / VC (% won)           : {player_showdown_wins:>3d} / {self.showdowns_played[player]:>3d} ({pct_showdown_wins:>6.2f}%)")
-        print()
-
-class PreFlopStats:
-    def __init__(self, evening: Evening):
-        # How many times did you limp
-        # How many times did you call, what was your avg call
-        # How many times did you raise, what was your avg raise
-        self.evening = evening
-        limp_rounds = defaultdict(list)
-        raise_amts = defaultdict(list)
-        raise_rounds = defaultdict(list)
-
-        for round in evening.rounds:
-            preflop_amounts = round.money_in_round(round.preflop_moves)
-            for player, amt in preflop_amounts.items():
-                if amt == round.big_blind[1] and len(round.find_moves(player, "fold", round.preflop_moves)):
-                    limp_rounds[player].append(round)
-
-            # In case there are multiple raises in a single round
-            round_raises = {}
-            for move in round.preflop_moves:
-                if move.action_name == "raise":
-                    round_raises[move.player] = move.amount
-
-            for player, amt in round_raises.items():
-                raise_amts[player].append(amt)
-                raise_rounds[player].append(round)
-
-        self.limp_rounds = limp_rounds
-        self.raise_amts = raise_amts
-        self.raise_rounds = raise_rounds
-
-    def print(self):
-        print(colored("Preflop Behavior:", "white", attrs=["underline"]))
-        for player in self.evening.players.keys():
-
-    
-            print(colored(f"  Player: {player}", "white", attrs=["bold"]))
-            print(f"    # Limped           : {len(self.limp_rounds[player]):>3}")
-            print(f"    # Raise (avg amt)  : {len(self.raise_rounds[player]):>3} ({avg(self.raise_amts[player]):.0f})") 
-        print()
-
-
-def fold_stats():
-    # What amount causes a person to fold (absolute) vs (relative to pot)
-    pass
-
-def RandomnessStats(evening: Evening):
-    player = evening.username
-    player_hands = [round.known_hands[player] for round in evening.rounds if player in round.known_hands]
-    
-    val_counts = defaultdict(int)
-    hands = []
-    for c1, c2 in player_hands:
-        c1 = c1.replace("10", "T")
-        c2 = c2.replace("10", "T")
-        val_counts[c1[0]] += 1
-        val_counts[c1[-1]] += 1
-        val_counts[c2[0]] += 1
-        val_counts[c2[-1]] += 1
-
-        if c1[0] != c2[0]:
-            if c1[-1] == c2[-1]:
-                suited = "s"
-            else:
-                suited = "o"
-            if CARD_ORDER.index(c1[0]) > CARD_ORDER.index(c2[0]):
-                hands.append(c1[0] + c2[0] + suited)
-            else:
-                hands.append(c2[0] + c1[0] + suited)
-        else:
-            hands.append(c1[0] + c2[0])
-            
-    card_count = len(player_hands) * 2
-
-    val_counts = {k:v/card_count for k,v in val_counts.items()}
-    sorted_keys = sorted(val_counts.keys())
-    for k in sorted_keys:
-        print(f"{k} : {val_counts[k] * 100:>3.2f}%")
-    
-
-
-    hand_ranks = {row[1]:float(row[0]) for row in csv.reader(open("hand_order.txt"))}
-    ranks = [hand_ranks[hand] for hand in hands]
-
-    print("Median: ", statistics.median(ranks)) 
-
-
 
 def compute_stats(evening):
     win_stats = WinStats(evening)
     play_stats = PlayStats(evening, win_stats)
-    preflop_stats = PreFlopStats(evening)
+    preflop_stats = PreFlopStats(evening, play_stats)
     play_stats.print()
     win_stats.print()
     preflop_stats.print()
     # evening.plot_progression()
-    # RandomnessStats(evening)
+    # hand_variance(evening)
+
 
 def main():
     filename = sys.argv[1]
     p = Parser()
     evening = p.parse("", filename)
     compute_stats(evening)
-
-def avg(vals):
-    return safe_div(sum(vals), len(vals))
-
-def safe_div(numer, denom) -> int:
-    if denom == 0:
-        return 0
-    return numer / denom
 
 
 if __name__ == "__main__":
