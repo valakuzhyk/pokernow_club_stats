@@ -39,11 +39,17 @@ class Evening:
         self.players = {}
         self.historical_amounts = defaultdict(list)
 
+    def get_rounds(self):
+        return [x for x in self.rounds if x.total_money_in_round()]
+
+
     def plot_progression(self):
         import matplotlib.pyplot as plt 
 
-        for player, amts in self.historical_amounts.items():
-            plt.plot(range(len(amts)), amts, label=player)
+
+        for player, round_amts in self.historical_amounts.items():
+            rounds, amts = list(zip(*round_amts))
+            plt.plot(rounds, amts, label=player)
         
         plt.xlabel("Round #")
         plt.ylabel("# of Chips")
@@ -67,7 +73,7 @@ class Evening:
 
     def _record_amounts(self):
         for player, amt in self.players.items():
-            self.historical_amounts[player].append(amt)
+            self.historical_amounts[player].append((len(self.rounds), amt))
 
     def _update_amounts(self):
         last_round = self.rounds[-1]
@@ -140,6 +146,9 @@ class Round:
             if m.amount > 0: # ignore all moves that don't involve money
                 spent[m.player] = m.amount
         return spent
+
+    def total_money_in_round(self):
+        return sum(self.money_spent().values())
 
     def money_spent(self):
         spent = defaultdict(int)
@@ -239,6 +248,14 @@ class Parser:
             pass
         elif "passed the room ownership" in line:
             pass
+        elif line.startswith("Players stacks:"):
+            line = line[len("Players stacks: "):]
+            stack_sizes = [x.strip().rsplit(' ', 1) for x in line.split(" | ")]
+            player_amounts = {player.strip('"'): int(stack_size.strip('()')) for (player, stack_size) in stack_sizes}
+            for player, amount in player_amounts.items():
+                if amount != self.evening.players[player]:
+                    print(f"**ERROR ERROR** {player}: {amount} != {self.evening.players[player]}")
+                    self.evening.players[player] = amount
         elif "-- starting hand" in line:
             if "dead button" in line:
                 dealer_name = "None"
@@ -329,7 +346,7 @@ def compute_stats(evening):
     play_stats.print()
     win_stats.print()
     preflop_stats.print()
-    # evening.plot_progression()
+    evening.plot_progression()
     # hand_variance(evening)
 
 

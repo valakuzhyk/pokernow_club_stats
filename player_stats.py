@@ -1,7 +1,7 @@
 import statistics
 from termcolor import colored
 from collections import defaultdict
-from utilities import avg, safe_div
+from utilities import avg, safe_div, median
 
 
 class WinStats:
@@ -12,7 +12,7 @@ class WinStats:
         wins = defaultdict(list)
         showdown_wins = defaultdict(list)
         preshowdown_wins = defaultdict(list)
-        for round in evening.rounds:
+        for round in evening.get_rounds():
             for (player, hand, amt, _) in round.winners:
                 wins[player].append(amt)
                 if hand is None:
@@ -33,9 +33,10 @@ class WinStats:
             pct_at_showdown = safe_div(len(showdown_wins[player]),  num_wins ) * 100
             pct_at_preshowdown = safe_div(len(preshowdown_wins[player]), num_wins ) * 100
             win_amts = showdown_wins[player] + preshowdown_wins[player]
-            median_win_amt = statistics.median(win_amts)
-            median_showdown_amt = statistics.median(showdown_wins[player])
-            median_preshowdown_amt = statistics.median(preshowdown_wins[player])
+
+            median_win_amt = median(win_amts)
+            median_showdown_amt = median(showdown_wins[player])
+            median_preshowdown_amt = median(preshowdown_wins[player])
 
             print(colored(f"  {player}", "white", attrs=["bold"]))
             print(f"    # wins (median): {num_wins:>2} ({median_win_amt:0.0f})")
@@ -51,7 +52,7 @@ class PlayStats:
         rounds_present = defaultdict(int)
         rounds_contributed = defaultdict(int)
         showdowns_played = defaultdict(int)
-        for round in evening.rounds:
+        for round in evening.get_rounds():
             for player in round.names_in_showdown():
                 showdowns_played[player] += 1
 
@@ -70,8 +71,8 @@ class PlayStats:
         # % Showdowns won
 
         print(colored("Play Stats (What happened when you played in a round?)", "white", attrs=["underline"]))
-        total_rounds = len(self.evening.rounds)
-        print(f"Rounds: {total_rounds}")
+        max_rounds = len(self.evening.get_rounds())
+        print(f"Rounds: {max_rounds}")
         for player in self.evening.players.keys():
             total_rounds = self.rounds_present[player]
             player_wins = len(self.win_stats.wins[player])
@@ -106,10 +107,10 @@ class PreFlopStats:
         three_bet_amts = defaultdict(list)
         three_bet_rounds = defaultdict(list)
 
-        for round in evening.rounds:
+        for round in evening.get_rounds():
             preflop_amounts = round.money_in_round(round.preflop_moves)
             for player, amt in preflop_amounts.items():
-                if amt == round.big_blind[1] and len(round.find_moves(player, "fold", round.preflop_moves)):
+                if amt == round.big_blind[1] and 0 == len(round.find_moves(player, "fold", round.preflop_moves)):
                     limp_rounds[player].append(round)
 
             # In case there are multiple raises in a single round
@@ -143,12 +144,17 @@ class PreFlopStats:
     def print(self):
         print(colored("Preflop Behavior:", "white", attrs=["underline"]))
         for player in self.evening.players.keys():
+            total_rounds = self.play_stats.rounds_present[player]
+            pct_played = safe_div(self.play_stats.rounds_contributed[player], total_rounds) * 100
             pct_limped = safe_div(len(self.limp_rounds[player]), self.play_stats.rounds_contributed[player]) * 100
-            pct_raised = safe_div(len(self.raise_rounds[player]), self.play_stats.rounds_present[player]) * 100
-            pct_3bet = safe_div(len(self.three_bet_rounds[player]), self.play_stats.rounds_present[player]) *100
+            pct_raised = safe_div(len(self.raise_rounds[player]), total_rounds) * 100
+            pct_3bet = safe_div(len(self.three_bet_rounds[player]), total_rounds) *100
             print(colored(f"  Player: {player}", "white", attrs=["bold"]))
             print(f"                        Avg Raise Amount  : {avg(self.raise_amts[player]):>3.0f}")
             print(f"                        Avg 3-Bet Amount  : {avg(self.three_bet_amts[player]):>3.0f}")
+            print(
+                f"   Num. Voluntary / Rounds Played  (VPIP) : "
+                f"{self.play_stats.rounds_contributed[player]:>3d} / {total_rounds:>3d} ({pct_played:>6.2f}%)")
             print(
                 f"Rounds Raised / Rounds Present      (PFR) : "
                 f"{len(self.raise_rounds[player]):>3d} / {self.play_stats.rounds_present[player]:>3d} ({pct_raised:>6.2f}%)")
