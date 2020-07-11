@@ -39,3 +39,11 @@ def hand_variance(evening):
     ranks = [hand_ranks()[hand] for hand in hands]
 
     print("Median: ", statistics.median(ranks))
+
+def flop_variance(evening):
+    flops =  [round.flop for round in evening.rounds if round.flop is not None]
+
+    same_suit_flops = [flop for flop in flops if flop[0][1] == flop[1][1] and flop[1][1] == flop[2][1]]
+    print(same_suit_flops)
+
+    print(f"Percentage of flops that were the same suit is {len(same_suit_flops)/len(flops)}")    
