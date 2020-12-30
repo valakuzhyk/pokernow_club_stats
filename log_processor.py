@@ -1,6 +1,7 @@
 import sys
 import csv
 import colorama 
+import re
 from typing import List, Set
 from collections import defaultdict
 from variance_stats import hand_variance
@@ -82,12 +83,11 @@ class Evening:
         for user, amount in spent.items():
             self.players[user] -= amount
 
-        for (winner_name, hand, amt, _) in last_round.winners:
-            if hand is None:
+        if len(last_round.winners) == 1:
+            for (winner_name, hand, amt, _) in last_round.winners:
                 self.players[winner_name] += pot_size
-                assert len(last_round.winners) == 1
-                break
-            else:
+        elif len(last_round.winners) > 1:
+            for (winner_name, hand, amt, _) in last_round.winners:
                 self.players[winner_name] += amt
 
 
@@ -230,6 +230,7 @@ class Parser:
 
     def parse_line(self, row):
         line, time, token = row
+        normline = line.lower()
         if "created the game with a stack of" in line or "The admin approved" in line:
             player_name = line.split('"')[1]
             start_amount = int(line.split()[-1][:-1])
@@ -239,7 +240,7 @@ class Parser:
         elif "requested a seat" in line:
             pass
         elif "stand up with the stack" in line:
-            print(line)
+            pass
         elif "sit back with the stack" in line:
             pass
         elif "quits the game with a stack of" in line:
@@ -248,13 +249,28 @@ class Parser:
             pass
         elif "passed the room ownership" in line:
             pass
-        elif line.startswith("Players stacks:"):
-            line = line[len("Players stacks: "):]
-            stack_sizes = [x.strip().rsplit(' ', 1) for x in line.split(" | ")]
-            player_amounts = {player.strip('"'): int(stack_size.strip('()')) for (player, stack_size) in stack_sizes}
+        elif "the admin queued the stack change for the player" in line:
+            pass
+        elif "The admin updated the player" in line:
+            pass
+        elif "small blind was changed from" in line:
+            pass
+        elif "big blind was changed from" in line:
+            pass
+        elif "dead small blind" in normline or "dead big blind" in normline:
+            pass
+        elif "uncalled bet" in normline:
+            pass 
+        elif line.startswith("Player stacks:"):
+            line = line[len("Player stacks: "):]
+            entries = line.split(" | ")
+            stack_sizes = [x.strip().rsplit(' ', 1)[1] for x in entries]
+            stack_size_counts = [int(x.strip('()')) for x in stack_sizes]
+            players = [x.split('"')[1] for x in entries]
+            player_amounts = {player: stack_size for (player, stack_size) in zip(players, stack_size_counts)}
             for player, amount in player_amounts.items():
                 if amount != self.evening.players[player]:
-                    print(f"**ERROR ERROR** {player}: {amount} != {self.evening.players[player]}")
+                    print(f"**WARNING** {player}: {amount} != {self.evening.players[player]}")
                     self.evening.players[player] = amount
         elif "-- starting hand" in line:
             if "dead button" in line:
@@ -284,9 +300,10 @@ class Parser:
             player_name = line.split('"')[1]
             small_blind = int(line.split()[-1])
             self._current_round.add_move(player_name, "missing_big_blind", small_blind, time)
-        elif "posts a big blind of" in line:
-            player_name = line.split('"')[1]
-            big_blind = int(line.split()[-1])
+        elif re.search('"(.*)" posts a big blind of (\d+)', line):
+            match = re.search('"(.*)" posts a big blind of (\d+)', line)
+            player_name = match.group(1)
+            big_blind = int(match.group(2))
             self._current_round.add_move(player_name, "big_blind", big_blind, time)
         elif line.endswith("folds"):
             player_name = line.split('"')[1]
@@ -294,33 +311,63 @@ class Parser:
         elif line.endswith("checks"):
             player_name = line.split('"')[1]
             self._current_round.add_move(player_name, "check", 0, time)
-        elif "calls with" in line:
-            player_name = line.split('"')[1]
-            call_amount = int(line.split()[-1])
+        elif re.search('"(.*)" calls (\d+)$', line):
+            match = re.search('"(.*)" calls (\d+)$', line)
+            player_name = match.group(1)
+            call_amount = int(match.group(2))
             self._current_round.add_move(player_name, "call", call_amount, time)
-        elif "calls and all in with" in line:
-            player_name = line.split('"')[1]
-            raise_amount = int(line.split()[-1])
-            self._current_round.add_move(player_name, "call (all in)", raise_amount, time)
-        elif "raises with" in line:
-            player_name = line.split('"')[1]
-            raise_amount = int(line.split()[-1])
+        elif re.search('"(.*)" calls (\d+) and go all ', line):
+            match = re.search('"(.*)" calls (\d+) and go all ', line)
+            player_name = match.group(1)
+            call_amount = int(match.group(2))
+            self._current_round.add_move(player_name, "call (all in)", call_amount, time)
+        elif re.search('"(.*)" raises to (\d+)$', line):
+            match = re.search('"(.*)" raises to (\d+)$', line)
+            player_name = match.group(1)
+            raise_amount = int(match.group(2))
             self._current_round.add_move(player_name, "raise", raise_amount, time)
+        elif re.search('"(.*)" raises to (\d+) and go all ', line):
+            match = re.search('"(.*)" raises to (\d+) and go all ', line)
+            player_name = match.group(1)
+            raise_amount = int(match.group(2))
+            self._current_round.add_move(player_name, "raise (all in)", raise_amount, time)
+        elif re.search('"(.*)" bets (\d+)$', line):
+            # TODO: This is the first bet in a round, should be treated differently
+            match = re.search('"(.*)" bets (\d+)$', line)
+            player_name = match.group(1)
+            raise_amount = int(match.group(2))
+            self._current_round.add_move(player_name, "raise", raise_amount, time)
+        elif re.search('"(.*)" bets (\d+) and go all ', line):
+            # TODO: This is the first bet in a round, should be treated differently
+            match = re.search('"(.*)" bets (\d+) and go all ', line)
+            player_name = match.group(1)
+            raise_amount = int(match.group(2))
+            self._current_round.add_move(player_name, "raise (all in)", raise_amount, time)
         elif "raises and all in with" in line:
             player_name = line.split('"')[1]
             raise_amount = int(line.split()[-1])
             self._current_round.add_move(player_name, "raise (all in)", raise_amount, time)
-        elif line.startswith("flop"):
+        elif normline.startswith("flop"):
             card_string = line.split('[')[1].split(']')[0]
             cards = card_string.split(', ')
             self._current_round.flop = cards
-        elif line.startswith("turn"):
+        elif normline.startswith("turn"):
             card = line.split('[')[1].split(']')[0]
             self._current_round.turn = card
-        elif line.startswith("river"):
+        elif normline.startswith("river"):
             card = line.split('[')[1].split(']')[0]
             self._current_round.river = card
-        elif " gained " in line:
+        elif re.search('"(.*)" collected (\d+) from pot$', line):
+            match = re.search('"(.*)" collected (\d+) from pot$', line)
+            winner_name = match.group(1)
+            win_amount = int(match.group(2))
+            self._current_round.winners.append((winner_name, None, win_amount, time))
+        elif re.search('"(.*)" collected (\d+) from pot with ', line):
+            match = re.search('"(.*)" collected (\d+) from pot with ', line)
+            winner_name = match.group(1)
+            win_amount = int(match.group(2))
+            self._current_round.winners.append((winner_name, None, win_amount, time))
+        elif " collected " in line:
             winner_name = line.split('"')[1]
             win_amount = int(line.split()[-1])
             self._current_round.winners.append((winner_name, None, win_amount, time))
@@ -335,6 +382,7 @@ class Parser:
             print(self._current_round)
             # self._current_round = None
         else:
+            print("Unexpected line found in log. Likely the log format has changed and this script needs to be updated.")
             print(line)
             assert False
 
