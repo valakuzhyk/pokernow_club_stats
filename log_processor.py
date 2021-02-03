@@ -2,6 +2,7 @@ import sys
 import csv
 import colorama 
 import re
+import argparse
 from typing import List, Set
 from collections import defaultdict
 from variance_stats import hand_variance
@@ -117,6 +118,10 @@ class Round:
         self.flop = None
         self.turn = None
         self.river = None
+
+        # Only populated if a round is "run twice"
+        self.second_flop = None
+        self.second_turn = None
 
         self.preflop_moves : List[Action] = []
         self.flop_moves : List[Action] = []
@@ -249,9 +254,11 @@ class Parser:
             pass
         elif "passed the room ownership" in line:
             pass
-        elif "the admin queued the stack change for the player" in line:
+        elif "queued the stack change for the player" in line:
             pass
-        elif "The admin updated the player" in line:
+        elif "enqueued the removal of the player " in line:
+            pass
+        elif "updated the player" in line:
             pass
         elif "small blind was changed from" in line:
             pass
@@ -261,6 +268,8 @@ class Parser:
             pass
         elif "uncalled bet" in normline:
             pass 
+        elif re.search("run it twice", line):
+            pass
         elif line.startswith("Player stacks:"):
             line = line[len("Player stacks: "):]
             entries = line.split(" | ")
@@ -305,6 +314,16 @@ class Parser:
             player_name = match.group(1)
             big_blind = int(match.group(2))
             self._current_round.add_move(player_name, "big_blind", big_blind, time)
+        elif re.search('"(.*)" posts a straddle of (\d+)', line):
+            match = re.search('"(.*)" posts a straddle of (\d+)', line)
+            player_name = match.group(1)
+            straddle = int(match.group(2))
+            self._current_round.add_move(player_name, "straddle", straddle, time)
+        elif re.search('"(.*)" posts a straddle of (\d+)', line):
+            match = re.search('"(.*)" posts a straddle of (\d+)', line)
+            player_name = match.group(1)
+            straddle = int(match.group(2))
+            self._current_round.add_move(player_name, "straddle", straddle, time)
         elif line.endswith("folds"):
             player_name = line.split('"')[1]
             self._current_round.add_move(player_name, "fold", 0, time)
@@ -351,10 +370,16 @@ class Parser:
             card_string = line.split('[')[1].split(']')[0]
             cards = card_string.split(', ')
             self._current_round.flop = cards
-        elif normline.startswith("turn"):
+        elif normline.startswith("turn (second run):"):
+            card = line.split('[')[1].split(']')[0]
+            self._current_round.second_turn = card
+        elif normline.startswith("river (second run):"):
+            card = line.split('[')[1].split(']')[0]
+            self._current_round.second_river = card
+        elif normline.startswith("turn:"):
             card = line.split('[')[1].split(']')[0]
             self._current_round.turn = card
-        elif normline.startswith("river"):
+        elif normline.startswith("river:"):
             card = line.split('[')[1].split(']')[0]
             self._current_round.river = card
         elif re.search('"(.*)" collected (\d+) from pot$', line):
@@ -387,7 +412,7 @@ class Parser:
             assert False
 
 
-def compute_stats(evening):
+def compute_stats(evening, args):
     win_stats = WinStats(evening)
     play_stats = PlayStats(evening, win_stats)
     preflop_stats = PreFlopStats(evening, play_stats)
@@ -399,10 +424,18 @@ def compute_stats(evening):
 
 
 def main():
-    filename = sys.argv[1]
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument("log_file", help='Path to a log file from pokernow.com')
+    arg_parser.add_argument("--output", help='File to write results to')
+    arg_parser.add_argument("--plot_chips", help='Attempts to plot the progression of chips')
+
+    args = arg_parser.parse_args()
+
+    filename = args.log_file
+
     p = Parser()
     evening = p.parse("", filename)
-    compute_stats(evening)
+    compute_stats(evening, args)
 
 
 if __name__ == "__main__":
