@@ -371,13 +371,6 @@ class Parser:
             player_name = match.group(1)
             raise_amount = int(match.group(2))
             self._current_round.add_move(player_name, "raise (all in)", raise_amount, time)
-
-        elif match := re.search(r'"(.*)" raises to (\d+) and go all ', line):
-            player_name = match.group(1)
-            raise_amount = int(match.group(2))
-            self._current_round.add_move(player_name, "raise (all in)", raise_amount, time)
-
-
         elif re.search(r'"(.*)" bets (\d+)$', line):
             # TODO: This is the first bet in a round, should be treated differently
             match = re.search(r'"(.*)" bets (\d+)$', line)
