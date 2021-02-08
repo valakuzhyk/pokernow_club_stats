@@ -300,7 +300,8 @@ class Parser:
                     round_no = self._current_round.number
                     print(f"**WARNING** start of round #{round_no}: "
                           f"{player}: {amount} (amount from log) != {self.evening.players[player]} (our amount)")
-                    print("winners in prev round: ", self.evening.rounds[-2].winners)
+                    if len(self.evening.rounds) > 1:
+                        print("winners in prev round: ", self.evening.rounds[-2].winners)
                     self.evening.players[player] = amount
         elif "-- starting hand" in line:
             if "dead button" in line:
