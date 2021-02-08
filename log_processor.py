@@ -1,16 +1,15 @@
 import sys
 import csv
-import colorama 
+import colorama
 import re
 import argparse
 from typing import List, Set
 from collections import defaultdict
-from variance_stats import hand_variance
 from player_stats import WinStats, PlayStats, PreFlopStats
 colorama.init()
 
 
-# Ideas for analyses 
+# Ideas for analyses
 # Win statistics
 # Position analysis
 # Time analysis
@@ -44,15 +43,14 @@ class Evening:
     def get_rounds(self):
         return [x for x in self.rounds if x.total_money_in_round()]
 
-
     def plot_progression(self):
-        import matplotlib.pyplot as plt 
-
+        import matplotlib.pyplot as plt
 
         for player, round_amts in self.historical_amounts.items():
             rounds, amts = list(zip(*round_amts))
-            plt.plot(rounds, amts, label=player)
-        
+            player_name = player.split("@")[0].strip()
+            plt.plot(rounds, amts, label=player_name)
+
         plt.xlabel("Round #")
         plt.ylabel("# of Chips")
 
@@ -69,7 +67,7 @@ class Evening:
         if len(self.rounds) != 0:
             self._update_amounts()
         self._record_amounts()
-        new_round = Round(dealer, self.players)
+        new_round = Round(dealer, self.players, len(self.rounds) + 1)
         self.rounds.append(new_round)
         return new_round
 
@@ -107,10 +105,11 @@ class Action:
 
 
 class Round:
-    def __init__(self, dealer, players):
+    def __init__(self, dealer, players, number):
         self.initial_amounts = {name: amt for (name, amt) in players.items()}
         self.dealer = dealer
         self.winners = []
+        self.number = number  # start numbering from 1
 
         # Username to hand
         self.known_hands = {}
@@ -122,34 +121,44 @@ class Round:
         # Only populated if a round is "run twice"
         self.second_flop = None
         self.second_turn = None
-
-        self.preflop_moves : List[Action] = []
-        self.flop_moves : List[Action] = []
-        self.turn_moves : List[Action] = []
-        self.river_moves : List[Action] = []
+        self.preflop_moves: List[Action] = []
+        self.flop_moves: List[Action] = []
+        self.turn_moves: List[Action] = []
+        self.river_moves: List[Action] = []
 
     @property
     def small_blind(self) -> (str, int):
         small_blind_action = [x for x in self.preflop_moves if x.action_name == "small_blind"][0]
-        return (small_blind_action.player, small_blind_action.amount)
+        return small_blind_action.player, small_blind_action.amount
 
     @property
     def big_blind(self) -> (str, int):
         big_blind_action = [x for x in self.preflop_moves if x.action_name == "big_blind"][0]
-        return (big_blind_action.player, big_blind_action.amount)
-    
-    def find_moves(self, player, action_name, moves):
+        return big_blind_action.player, big_blind_action.amount
+
+    @staticmethod
+    def find_moves(player, action_name, moves):
         return [move for move in moves if (move.player == player and move.action_name == action_name)]
 
-
-    def money_in_round(self, moves):
+    @staticmethod
+    def money_in_round(moves):
         """
         How much money was spent by each player in a round
         """
         spent = {}
         for m in moves:
-            if m.amount > 0: # ignore all moves that don't involve money
-                spent[m.player] = m.amount
+            if m.amount != 0:  # ignore all moves that don't involve money
+                if m.action_name == 'uncalled_bet':
+                    spent[m.player] -= m.amount
+                else:
+                    spent[m.player] = m.amount
+
+        for m in moves:
+            if m.action_name == "missing_small_blind":
+                spent[m.player] += m.amount
+            if m.action_name == "missing_big_blind" and not Round.find_moves(m.player, "missing_small_blind", moves):
+                spent[m.player] += m.amount
+
         return spent
 
     def total_money_in_round(self):
@@ -158,7 +167,7 @@ class Round:
     def money_spent(self):
         spent = defaultdict(int)
         for moves in [self.preflop_moves, self.flop_moves, self.turn_moves, self.river_moves]:
-            for player, amount in self.money_in_round(moves).items():
+            for player, amount in Round.money_in_round(moves).items():
                 spent[player] += amount
         return spent
 
@@ -176,7 +185,7 @@ class Round:
         present = set()
         for m in self.preflop_moves:
             present.add(m.player)
-        return present            
+        return present
 
     def names_in_showdown(self):
         names = set()
@@ -197,7 +206,8 @@ class Round:
             self.river_moves.append(action)
 
     def __str__(self):
-        s = f"Game: {self.initial_amounts}\n"
+        s = f"Round {self.number}\n"
+        s += f"Game: {self.initial_amounts}\n"
         s += f"  {self.preflop_moves}\n"
         s += f"  {self.flop_moves}\n"
         s += f"  {self.turn_moves}\n"
@@ -212,7 +222,7 @@ class Round:
 
 class Parser:
     def __init__(self):
-        self.username = None 
+        self.username = None
 
     @property
     def _current_round(self):
@@ -220,7 +230,7 @@ class Parser:
 
     def parse(self, username, file_name) -> Evening:
         self.evening = Evening(username)
-        self.username = username 
+        self.username = username
         f = open(file_name, 'r')
         csv_reader = csv.reader(f)
         for row in reversed([row for row in csv_reader]):
@@ -243,6 +253,12 @@ class Parser:
         elif line == "entry":
             pass
         elif "requested a seat" in line:
+            pass
+        elif "canceled the seat request" in line:
+            pass
+        elif "rejected the seat request" in line:
+            pass
+        elif "changed the ID from" in line:
             pass
         elif "stand up with the stack" in line:
             pass
@@ -267,7 +283,9 @@ class Parser:
         elif "dead small blind" in normline or "dead big blind" in normline:
             pass
         elif "uncalled bet" in normline:
-            pass 
+            for amount, player_name in re.findall(r'Uncalled bet of (\d+) returned to "(.*)"', line):
+                self._current_round.add_move(player_name, "uncalled_bet", int(amount), time)
+                break
         elif re.search("run it twice", line):
             pass
         elif line.startswith("Player stacks:"):
@@ -279,7 +297,11 @@ class Parser:
             player_amounts = {player: stack_size for (player, stack_size) in zip(players, stack_size_counts)}
             for player, amount in player_amounts.items():
                 if amount != self.evening.players[player]:
-                    print(f"**WARNING** {player}: {amount} != {self.evening.players[player]}")
+                    round_no = self._current_round.number
+                    print(f"**WARNING** start of round #{round_no}: "
+                          f"{player}: {amount} (amount from log) != {self.evening.players[player]} (our amount)")
+                    if len(self.evening.rounds) > 1:
+                        print("winners in prev round: ", self.evening.rounds[-2].winners)
                     self.evening.players[player] = amount
         elif "-- starting hand" in line:
             if "dead button" in line:
@@ -297,7 +319,7 @@ class Parser:
             cards = line.split(" shows a ")[1][:-1].split(", ")
             self._current_round.known_hands[player_name] = cards
             self._current_round.add_move(player_name, "show", 0, time)
-        elif "posts a missing small blind of" in line:            
+        elif "posts a missing small blind of" in line:
             player_name = line.split('"')[1]
             small_blind = int(line.split()[-1])
             self._current_round.add_move(player_name, "missing_small_blind", small_blind, time)
@@ -305,12 +327,12 @@ class Parser:
             player_name = line.split('"')[1]
             small_blind = int(line.split()[-1])
             self._current_round.add_move(player_name, "small_blind", small_blind, time)
-        elif "posts a missed big blind of" in line:            
+        elif "posts a missed big blind of" in line:
             player_name = line.split('"')[1]
-            small_blind = int(line.split()[-1])
-            self._current_round.add_move(player_name, "missing_big_blind", small_blind, time)
-        elif re.search('"(.*)" posts a big blind of (\d+)', line):
-            match = re.search('"(.*)" posts a big blind of (\d+)', line)
+            big_blind = int(line.split()[-1])
+            self._current_round.add_move(player_name, "missing_big_blind", big_blind, time)
+        elif re.search(r'"(.*)" posts a big blind of (\d+)', line):
+            match = re.search(r'"(.*)" posts a big blind of (\d+)', line)
             player_name = match.group(1)
             big_blind = int(match.group(2))
             self._current_round.add_move(player_name, "big_blind", big_blind, time)
@@ -330,35 +352,35 @@ class Parser:
         elif line.endswith("checks"):
             player_name = line.split('"')[1]
             self._current_round.add_move(player_name, "check", 0, time)
-        elif re.search('"(.*)" calls (\d+)$', line):
-            match = re.search('"(.*)" calls (\d+)$', line)
+        elif re.search(r'"(.*)" calls (\d+)$', line):
+            match = re.search(r'"(.*)" calls (\d+)$', line)
             player_name = match.group(1)
             call_amount = int(match.group(2))
             self._current_round.add_move(player_name, "call", call_amount, time)
-        elif re.search('"(.*)" calls (\d+) and go all ', line):
-            match = re.search('"(.*)" calls (\d+) and go all ', line)
+        elif re.search(r'"(.*)" calls (\d+) and go all ', line):
+            match = re.search(r'"(.*)" calls (\d+) and go all ', line)
             player_name = match.group(1)
             call_amount = int(match.group(2))
             self._current_round.add_move(player_name, "call (all in)", call_amount, time)
-        elif re.search('"(.*)" raises to (\d+)$', line):
-            match = re.search('"(.*)" raises to (\d+)$', line)
+        elif re.search(r'"(.*)" raises to (\d+)$', line):
+            match = re.search(r'"(.*)" raises to (\d+)$', line)
             player_name = match.group(1)
             raise_amount = int(match.group(2))
             self._current_round.add_move(player_name, "raise", raise_amount, time)
-        elif re.search('"(.*)" raises to (\d+) and go all ', line):
-            match = re.search('"(.*)" raises to (\d+) and go all ', line)
+        elif re.search(r'"(.*)" raises to (\d+) and go all ', line):
+            match = re.search(r'"(.*)" raises to (\d+) and go all ', line)
             player_name = match.group(1)
             raise_amount = int(match.group(2))
             self._current_round.add_move(player_name, "raise (all in)", raise_amount, time)
-        elif re.search('"(.*)" bets (\d+)$', line):
+        elif re.search(r'"(.*)" bets (\d+)$', line):
             # TODO: This is the first bet in a round, should be treated differently
-            match = re.search('"(.*)" bets (\d+)$', line)
+            match = re.search(r'"(.*)" bets (\d+)$', line)
             player_name = match.group(1)
             raise_amount = int(match.group(2))
             self._current_round.add_move(player_name, "raise", raise_amount, time)
-        elif re.search('"(.*)" bets (\d+) and go all ', line):
+        elif re.search(r'"(.*)" bets (\d+) and go all ', line):
             # TODO: This is the first bet in a round, should be treated differently
-            match = re.search('"(.*)" bets (\d+) and go all ', line)
+            match = re.search(r'"(.*)" bets (\d+) and go all ', line)
             player_name = match.group(1)
             raise_amount = int(match.group(2))
             self._current_round.add_move(player_name, "raise (all in)", raise_amount, time)
@@ -382,21 +404,24 @@ class Parser:
         elif normline.startswith("river:"):
             card = line.split('[')[1].split(']')[0]
             self._current_round.river = card
-        elif re.search('"(.*)" collected (\d+) from pot$', line):
-            match = re.search('"(.*)" collected (\d+) from pot$', line)
+        elif re.search(r'"(.*)" collected (\d+) from pot$', line):
+            match = re.search(r'"(.*)" collected (\d+) from pot$', line)
             winner_name = match.group(1)
             win_amount = int(match.group(2))
             self._current_round.winners.append((winner_name, None, win_amount, time))
-        elif re.search('"(.*)" collected (\d+) from pot with ', line):
-            match = re.search('"(.*)" collected (\d+) from pot with ', line)
+        elif re.search(r'"(.*)" collected (\d+) from pot with .* \(combination: (.*)\)', line):
+            match = re.search(r'"(.*)" collected (\d+) from pot with .* \(combination: (.*)\)', line)
             winner_name = match.group(1)
             win_amount = int(match.group(2))
-            self._current_round.winners.append((winner_name, None, win_amount, time))
-        elif " collected " in line:
+            combination = match.group(3)
+            winning_hand = combination.split(", ")
+            self._current_round.known_hands[winner_name] = winning_hand
+            self._current_round.winners.append((winner_name, winning_hand, win_amount, time))
+        elif " collected " in line:  # obsoleted and covered by the previous case?
             winner_name = line.split('"')[1]
             win_amount = int(line.split()[-1])
             self._current_round.winners.append((winner_name, None, win_amount, time))
-        elif " wins " in line:
+        elif " wins " in line:  # obsoleted?
             winner_name, rest = line.split('"')[1:]
             amount = int(rest.split()[1])
             assert rest.endswith(')')
@@ -407,7 +432,8 @@ class Parser:
             print(self._current_round)
             # self._current_round = None
         else:
-            print("Unexpected line found in log. Likely the log format has changed and this script needs to be updated.")
+            print("**WARNING**: Unexpected line found in log. "
+                  "Likely the log format has changed and this script needs to be updated.")
             print(line)
             assert False
 
