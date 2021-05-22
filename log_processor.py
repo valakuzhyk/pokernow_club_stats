@@ -221,8 +221,11 @@ class Round:
 
 
 class Parser:
-    def __init__(self):
+    def __init__(self, ignore_warnings):
         self.username = None
+        # If there is a line that is not understood on the log, this field decides whether
+        # to immediately exit, or to ignore the line and continue parsing the log.
+        self._ignore_warnings = ignore_warnings
 
     @property
     def _current_round(self):
@@ -252,6 +255,8 @@ class Parser:
             self.evening.add_player(player_name, start_amount)
         elif line == "entry":
             pass
+        elif line.startswith("Undealt cards:"):
+            pass
         elif "requested a seat" in line:
             pass
         elif "canceled the seat request" in line:
@@ -280,7 +285,11 @@ class Parser:
             pass
         elif "big blind was changed from" in line:
             pass
+        elif re.search("The game's ante was changed from (\d+) to (\d+).", line):
+            pass
         elif "dead small blind" in normline or "dead big blind" in normline:
+            pass
+        elif re.search('The admin "(.*)" forced the player ".*" to away mode in the next hand.', line):
             pass
         elif "uncalled bet" in normline:
             for amount, player_name in re.findall(r'Uncalled bet of (\d+) returned to "(.*)"', line):
@@ -435,7 +444,8 @@ class Parser:
             print("**WARNING**: Unexpected line found in log. "
                   "Likely the log format has changed and this script needs to be updated.")
             print(line)
-            assert False
+            if not self._ignore_warnings:
+                assert False
 
 
 def compute_stats(evening, args):
@@ -454,12 +464,13 @@ def main():
     arg_parser.add_argument("log_file", help='Path to a log file from pokernow.com')
     arg_parser.add_argument("--output", help='File to write results to')
     arg_parser.add_argument("--plot_chips", help='Attempts to plot the progression of chips')
+    arg_parser.add_argument("--ignore_warnings", action="store_true", help="Ignores lines in the log that are not understood. This may cause additional inaccuracies.")
 
     args = arg_parser.parse_args()
 
     filename = args.log_file
 
-    p = Parser()
+    p = Parser(ignore_warnings= args.ignore_warnings)
     evening = p.parse("", filename)
     compute_stats(evening, args)
 
