@@ -71,6 +71,10 @@ class Evening:
         self.rounds.append(new_round)
         return new_round
 
+    def handle_last_round(self):
+        self._update_amounts()
+        self._record_amounts()
+
     def _record_amounts(self):
         for player, amt in self.players.items():
             self.historical_amounts[player].append((len(self.rounds), amt))
@@ -242,6 +246,7 @@ class Parser:
             except Exception as e:
                 print(row)
                 raise e
+        self.evening.handle_last_round()
         evening = self.evening
         self.evening = None
         return evening
