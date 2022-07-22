@@ -254,7 +254,7 @@ class Parser:
     def parse_line(self, row):
         line, time, token = row
         normline = line.lower()
-        if "created the game with a stack of" in line or "The admin approved" in line:
+        if "created the game with a stack of" in line or "The admin approved" in line or "joined the game with a stack" in line:
             player_name = line.split('"')[1]
             start_amount = int(line.split()[-1][:-1])
             self.evening.add_player(player_name, start_amount)
