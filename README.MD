@@ -2,7 +2,7 @@ A quick tool for getting basic statistics on logs from https://www.pokernow.club
 
 Usage:
 
-python3 log_processor.py logs/
+python3 log_processor.py <log_filename.csv>
 
 Warnings may be emitted when new log formats are introduced, which can prevent results from being printed. At this point, you have two options:
 
